@@ -1,36 +1,51 @@
-# This is a basic workflow to help you get started with Actions
+name: Dummy-python-proj
 
-name: first Workflow
-
-# Controls when the workflow will run
+# Trigger: Jab bhi 'main' branch par push hoga, pipeline chalegi
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
   push:
-    branches: [ "master" ]
-  pull_request:
-    branches: [ "master" ]
+    branches:
+      - main
 
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
-
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
-    runs-on: ubuntu-latest
+  deploy:
+    runs-on: ubuntu-latest # GitHub Actions ka temporary Linux server
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+    # Step 1: GitHub repository se code ko temporary runner par copy karna
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
+    # Step 2: Docker Hub me safely log in karna
+    - name: Docker hub login
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
-        run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+    # Step 3: Project ki Dockerfile ko read karke Docker Image build karna
+    - name: Build App Image
+      run: |
+        docker build -t ${{ secrets.DOCKER_USERNAME }}/aws-dummy-app:latest .
+
+    # Step 4: Bani hui Docker Image ko Docker Hub Registry par upload karna
+    - name: Push App Image
+      run: |
+         docker push ${{ secrets.DOCKER_USERNAME }}/aws-dummy-app:latest
+
+    # Step 5: SSH ke zariye AWS EC2 me login karke commands run karna
+    - name: Deploy app to EC2
+      uses: appleboy/ssh-action@v1.2.0
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ubuntu
+        key: ${{ secrets.EC2_SSH_KEY }}
+        port: 22 # Linux SSH default port
+        script: |
+          # 1. Docker Hub se latest image ko EC2 me download (pull) karna
+          sudo docker pull ${{ secrets.DOCKER_USERNAME }}/aws-dummy-app:latest
+          
+          # 2. Agar koi purana container same naam se chal raha hai to use delete karna
+          sudo docker rm -f aws-dummy-cont || true
+          
+          # 3. Naye container ko background (-d) me automatic restart policy ke sath Port 80 par run karna
+          sudo docker run -d --restart unless-stopped --name aws-dummy-cont -p 80:5000 ${{ secrets.DOCKER_USERNAME }}/aws-dummy-app:latest
